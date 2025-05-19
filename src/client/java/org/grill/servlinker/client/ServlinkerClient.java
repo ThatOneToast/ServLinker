@@ -5,6 +5,7 @@ import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import org.slf4j.Logger;
@@ -14,23 +15,78 @@ public class ServlinkerClient implements ClientModInitializer {
 
     public static final String MOD_ID = "ServLinker";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
-
+    
+    public static final ServLinker serv = new ServLinker();
+    public static InputCapture inputCapture;
+    
     private static String currentServerAddress;
     private static int currentServerPort;
     private static boolean isConnected = false;
 
     @Override
     public void onInitializeClient() {
+        // Initialize input capture
+        inputCapture = new InputCapture(serv);
+        
         ClientPlayConnectionEvents.INIT.register((handler, client) -> {
             extractServerAddressAndPort(handler);
+            // Try to connect with retries
+            boolean res = false;
+            for (int attempt = 0; attempt < 3 && !res; attempt++) {
+                LOGGER.info("Attempting to connect to ServLinker Server (attempt {})", attempt + 1);
+                res = serv.connect();
+                if (!res && attempt < 2) {
+                    try {
+                        Thread.sleep(1000); // Wait before retry
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }
+            
+            if (res) {
+                LOGGER.info("Connected ServLinker Server!");
+                inputCapture.startCapturing();
+            } else {
+                LOGGER.error("!!Failed to connect to ServLinker Server after multiple attempts!!");
+            }
         });
+
+
 
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             // Clear server information when client disconnects
+            LOGGER.info("Disconnecting from server, cleaning up resources...");
             isConnected = false;
             currentServerAddress = null;
             currentServerPort = 0;
-            LOGGER.info("Disconnected from server");
+            if (inputCapture != null) {
+                inputCapture.stopCapturing();
+                LOGGER.info("Input capture stopped");
+            }
+            if (serv != null) {
+                boolean wasConnected = serv.isConnected();
+                serv.disconnect();
+                LOGGER.info("ServLinker disconnected (was connected: {})", wasConnected);
+            }
+            LOGGER.info("Disconnected from server - all cleanup complete");
+        });
+
+        // Add periodic connection check
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (isConnected && serv != null && !serv.isConnected() && currentServerAddress != null) {
+                LOGGER.warn("ServLinker connection lost, attempting to reconnect...");
+                boolean reconnected = serv.connect();
+                if (reconnected) {
+                    LOGGER.info("Successfully reconnected to ServLinker server");
+                    if (inputCapture != null && inputCapture.isCapturing()) {
+                        LOGGER.info("Restarting input capture after reconnection");
+                        inputCapture.startCapturing();
+                    }
+                } else {
+                    LOGGER.error("Failed to reconnect to ServLinker server");
+                }
+            }
         });
 
         LOGGER.info("ServLinker client mod initialized");
@@ -50,7 +106,9 @@ public class ServlinkerClient implements ClientModInitializer {
             LOGGER.info("Connected to server: {}", fullAddress);
 
             // Parse the address and remove any characters other than numbers, dots, and colons
+            String originalAddress = fullAddress;
             fullAddress = fullAddress.replaceAll("[^0-9.:]", "");
+            LOGGER.debug("Parsed address from '{}' to '{}'", originalAddress, fullAddress);
 
             String[] parts = fullAddress.split(":");
             if (parts.length >= 2) {
@@ -63,21 +121,30 @@ public class ServlinkerClient implements ClientModInitializer {
                         currentServerAddress,
                         currentServerPort
                     );
+                    
+                    // Validate the extracted address
+                    if (currentServerAddress.isEmpty() || currentServerPort <= 0) {
+                        LOGGER.warn("Extracted server details may be invalid: address='{}', port={}",
+                            currentServerAddress, currentServerPort);
+                    }
                 } catch (NumberFormatException e) {
                     LOGGER.error(
                         "Failed to parse server port: {}",
                         parts[1],
                         e
                     );
+                    isConnected = false;
                 }
             } else {
                 LOGGER.warn(
                     "Unable to parse server address and port from: {}",
                     fullAddress
                 );
+                isConnected = false;
             }
         } catch (Exception e) {
             LOGGER.error("Error extracting server address and port", e);
+            isConnected = false;
         }
     }
 
@@ -89,7 +156,8 @@ public class ServlinkerClient implements ClientModInitializer {
     public static Socket connectToDifferentPort(int port) {
         if (!isConnected || currentServerAddress == null) {
             LOGGER.warn(
-                "Not connected to a server or server address is unknown"
+                "Not connected to a server or server address is unknown. Connected={}, Address={}",
+                isConnected, currentServerAddress
             );
             return null;
         }
@@ -100,25 +168,35 @@ public class ServlinkerClient implements ClientModInitializer {
                 currentServerAddress,
                 port
             );
+            
+            // Add timeout settings to avoid hanging
             InetAddress serverAddress = InetAddress.getByName(
                 currentServerAddress
             );
-            Socket socket = new Socket(serverAddress, port);
+            Socket socket = new Socket();
+            socket.setSoTimeout(5000); // 5 second read timeout
+            socket.connect(new java.net.InetSocketAddress(serverAddress, port), 3000); // 3 second connection timeout
+            
             LOGGER.info(
-                "Successfully connected to {}:{}",
+                "Successfully connected to {}:{}, Socket details: isConnected={}, isBound={}, isClosed={}",
                 currentServerAddress,
-                port
+                port,
+                socket.isConnected(),
+                socket.isBound(),
+                socket.isClosed()
             );
             return socket;
         } catch (UnknownHostException e) {
             LOGGER.error("Unknown host: {}", currentServerAddress, e);
         } catch (IOException e) {
             LOGGER.error(
-                "Failed to connect to {}:{}",
+                "Failed to connect to {}:{} - {}",
                 currentServerAddress,
                 port,
-                e
+                e.getMessage()
             );
+        } catch (Exception e) {
+            LOGGER.error("Unexpected error connecting to {}:{}", currentServerAddress, port, e);
         }
 
         return null;
@@ -146,5 +224,13 @@ public class ServlinkerClient implements ClientModInitializer {
      */
     public static int getCurrentServerPort() {
         return currentServerPort;
+    }
+    
+    /**
+     * Get the input capture instance
+     * @return The input capture instance
+    **/
+    public static InputCapture getInputCapture() {
+        return inputCapture;
     }
 }
