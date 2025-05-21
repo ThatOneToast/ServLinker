@@ -7,11 +7,11 @@
   "authors": ["ThatOneToast"],
   "contact": {},
   "license": "All-Rights-Reserved",
-  "icon": "assets/servlinker/icon.png",
+  "icon": " ",
   "environment": "client",
   "entrypoints": {
     "fabric-datagen": [
-      "org.grill.servlinker.client.ServlinkerDataGenerator"
+      " "
     ],
     "client": [
       "org.grill.servlinker.client.ServlinkerClient"
