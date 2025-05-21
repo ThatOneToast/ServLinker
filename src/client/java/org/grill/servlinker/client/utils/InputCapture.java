@@ -1,4 +1,4 @@
-package org.grill.servlinker.client.packets;
+package org.grill.servlinker.client.utils;
 
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;

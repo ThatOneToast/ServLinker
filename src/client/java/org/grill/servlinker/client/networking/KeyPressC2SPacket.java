@@ -1,4 +1,4 @@
-package org.grill.servlinker.client.packets;
+package org.grill.servlinker.client.networking;
 
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
