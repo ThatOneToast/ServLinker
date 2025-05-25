@@ -1,24 +1,26 @@
 package org.grill.servlinker.client.utils;
 
+import lombok.Getter;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.InputUtil;
+import org.grill.servlinker.client.ServlinkerClient;
+import org.grill.servlinker.client.networking.KeyPressC2SPacket;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.HashSet;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public class InputCapture {
-    public final AtomicBoolean isCapturing = new AtomicBoolean(false);
+    @Getter private boolean capturing = true; // player can change this via keybinds
+
     private final Set<Integer> pressedKeys = new HashSet<>();
     private boolean leftMouseDown = false;
     private boolean rightMouseDown = false;
     private boolean middleMouseDown = false;
     private boolean button4Down = false;
     private boolean button5Down = false;
-
-    private final InputSender sender;
 
     private static final int[] VALID_KEY_CODES = {
             // Function keys
@@ -58,33 +60,29 @@ public class InputCapture {
             GLFW.GLFW_KEY_COMMA, GLFW.GLFW_KEY_PERIOD, GLFW.GLFW_KEY_SLASH
     };
 
-    // Interface to send string message via packet
-    public interface InputSender {
-        void send(String message);
-    }
-
-    public InputCapture(InputSender sender) {
-        this.sender = sender;
+    public InputCapture() {
         register();
     }
 
     private void register() {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (isCapturing.get()) {
-                checkKeyboardState(client);
-                checkMouseState(client);
-            }
+            if(!ServlinkerClient.serverHasPlugin) return;
+
+            boolean connectedToMultiplayer = client.getNetworkHandler() != null && client.getCurrentServerEntry() != null;
+            if (!capturing || !connectedToMultiplayer) return;
+
+            checkKeyboardState(client);
+            checkMouseState(client);
         });
     }
 
     public void startCapturing() {
-        isCapturing.set(true);
+        capturing = true;
     }
-
     public void stopCapturing() {
-        isCapturing.set(false);
+        capturing = false;
         pressedKeys.clear();
-        leftMouseDown = rightMouseDown = middleMouseDown = false;
+        leftMouseDown = rightMouseDown = middleMouseDown = button4Down = button5Down = false;
     }
 
     private void checkKeyboardState(MinecraftClient client) {
@@ -135,11 +133,15 @@ public class InputCapture {
     private void sendKeyEvent(String action, int keyCode) {
         String keyName = InputUtil.Type.KEYSYM.createFromCode(keyCode).getTranslationKey();
         String msg = "KEY|" + action + "|" + keyCode + "|" + keyName;
-        sender.send(msg);
+        sendPacket(msg);
     }
 
     private void sendMouseEvent(String button, String action) {
         String msg = "MOUSE_BUTTON|" + button + "|" + action;
-        sender.send(msg);
+        sendPacket(msg);
+    }
+
+    private static void sendPacket(String message) {
+        ClientPlayNetworking.send(new KeyPressC2SPacket(message));
     }
 }
