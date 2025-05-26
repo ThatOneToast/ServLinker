@@ -21,28 +21,39 @@ public class ServlinkerClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        LOGGER.info("ServLinker client initializing...");
+        
         PayloadTypeRegistry.playC2S().register(KeyInputToggleC2SPacket.ID, KeyInputToggleC2SPacket.CODEC);
         PayloadTypeRegistry.playC2S().register(KeyPressC2SPacket.ID, KeyPressC2SPacket.CODEC);
         PayloadTypeRegistry.playC2S().register(AckC2SPacket.ID, AckC2SPacket.CODEC);
 
         PayloadTypeRegistry.playS2C().register(SyncS2CPacket.ID, SyncS2CPacket.CODEC);
+        
+        LOGGER.info("Creating InputCapture instance...");
         register();
 
+        LOGGER.info("Registering keybinds with InputCapture: {}", inputCapture != null ? "success" : "failed");
         KeybindManager.registerInputKeybind(inputCapture);
         LOGGER.info("ServLinker client mod initialized");
     }
 
     private void register() {
+        LOGGER.info("Registering InputCapture and networking...");
         inputCapture = new InputCapture();
+        LOGGER.info("InputCapture created successfully: {}", inputCapture != null);
 
         ClientPlayNetworking.registerGlobalReceiver(SyncS2CPacket.ID, (packet, context) -> {
+            LOGGER.info("Received sync packet from server - server has plugin");
             serverHasPlugin = true;
             ClientPlayNetworking.send(new AckC2SPacket("ack"));
         });
 
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            LOGGER.info("Disconnected from server - stopping input capture");
             serverHasPlugin = false;
-            inputCapture.stopCapturing();
+            if (inputCapture != null) {
+                inputCapture.stopCapturing();
+            }
         });
     }
 }
